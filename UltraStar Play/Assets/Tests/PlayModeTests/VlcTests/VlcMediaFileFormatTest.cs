@@ -154,7 +154,9 @@ public class VlcMediaFileFormatTest : AbstractMediaFileFormatTest
         yield return new WaitForSeconds(0.5f);
 
         // Jump forward like "skip to next lyrics", then backward.
-        foreach (double targetPositionInMillis in new double[] { 3000, 500 })
+        // SongVideoPlayer synchronizes immediately for jumps of more than 2 seconds.
+        // Smaller offsets are corrected by the video sync strategy over time.
+        foreach (double targetPositionInMillis in new double[] { 3300, 300 })
         {
             songAudioPlayer.PositionInMillis = targetPositionInMillis;
             yield return new WaitForSeconds(0.5f);

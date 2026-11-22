@@ -13,26 +13,37 @@ public class VlcPlayback : IDisposable
 {
     private const long MicrosecondsPerMillisecond = 1000;
 
-    // Minimum period between time updates from libVLC
-    private const long WatchTimeMinimumPeriodInMicroseconds = 10_000;
+    // Maximum time to extrapolate the playback position beyond the last time reported by libVLC.
+    private const double MaxExtrapolationInMillis = 500;
+
+    // Maximum backward correction of the extrapolated position that is hidden to keep the position monotonic.
+    private const double MaxHiddenBackwardCorrectionInMillis = 100;
+
+    private const float PendingSeekTimeoutInSeconds = 1;
 
     private const float LoadTimeoutInSeconds = 10;
     private const float PausedLengthTimeoutInSeconds = 1;
 
     private readonly GameObject gameObject;
-    private readonly object timePointLock = new();
 
     public VLCMediaPlayer VlcMediaPlayer { get; private set; }
     private MediaPlayer MediaPlayer => VlcMediaPlayer != null ? VlcMediaPlayer.MediaPlayer : null;
 
-    // Last time update from libVLC, used to interpolate a smooth playback position.
-    private TimePoint? lastTimePoint;
-    private long? pausedSystemDateInMicroseconds;
+    // Last time reported by libVLC and when it changed, used to extrapolate a smooth playback position.
+    // libVLC updates its time only in steps.
+    private double lastVlcTimeInMillis = -1;
+    private float lastVlcTimeChangeInSeconds;
+    private double lastPositionInMillis;
 
-    // Position that has been set but is not yet reflected by libVLC's time updates.
+    // Position that has been set but is not yet reflected by the time of libVLC.
     private double? pendingSeekPositionInMillis;
+    private double vlcTimeAtSeekInMillis;
+    private float seekTimeInSeconds;
 
     private bool hasReachedEnd;
+
+    // libVLC needs some time to leave the stopped state after restarting the playback.
+    private bool isRestarting;
 
     // libVLC 4 reports the end of the media as "stopped". This is used to distinguish it from a requested stop.
     private bool isStopRequested;
@@ -56,11 +67,8 @@ public class VlcPlayback : IDisposable
 
         gameObject.SetActive(true);
 
-        MediaPlayer.Stopped += OnStopped;
-        unsafe
-        {
-            MediaPlayer.WatchTime(WatchTimeMinimumPeriodInMicroseconds, OnTimeUpdate, OnTimePaused, OnTimeSeek);
-        }
+        // Note: The state is polled instead of using libVLC events (e.g. MediaPlayer.Stopped, MediaPlayer.WatchTime).
+        // Events are called from libVLC threads, which can block the garbage collector of Unity's Mono runtime.
     }
 
     public async Awaitable LoadAsync(string uri, double startPositionInMillis, params string[] mediaOptions)
@@ -113,11 +121,11 @@ public class VlcPlayback : IDisposable
 
     private async Awaitable WaitForLengthAsync(float timeoutInSeconds)
     {
-        float startTime = Time.time;
+        float startTime = Time.realtimeSinceStartup;
         await ConditionUtils.WaitForConditionAsync(() => VlcMediaPlayer == null
                                                          || GetLengthInMillis() > 0
                                                          || MediaPlayer.State == VLCState.Error
-                                                         || Time.time - startTime > timeoutInSeconds);
+                                                         || Time.realtimeSinceStartup - startTime > timeoutInSeconds);
     }
 
     public void Play()
@@ -127,12 +135,14 @@ public class VlcPlayback : IDisposable
             return;
         }
 
+        UpdateHasReachedEnd();
         if (hasReachedEnd
             || MediaPlayer.State is VLCState.Stopped or VLCState.NothingSpecial)
         {
             // libVLC stops at the end of the media. It has to be started again.
             hasReachedEnd = false;
             isStopRequested = false;
+            isRestarting = true;
             VlcMediaPlayer.Play();
             return;
         }
@@ -154,9 +164,16 @@ public class VlcPlayback : IDisposable
         ResetTimeState();
     }
 
-    public bool IsPlaying => MediaPlayer != null
-                             && !hasReachedEnd
-                             && MediaPlayer.IsPlaying;
+    public bool IsPlaying
+    {
+        get
+        {
+            UpdateHasReachedEnd();
+            return MediaPlayer != null
+                   && !hasReachedEnd
+                   && MediaPlayer.IsPlaying;
+        }
+    }
 
     public double PlaybackSpeed
     {
@@ -181,26 +198,51 @@ public class VlcPlayback : IDisposable
                 return 0;
             }
 
+            UpdateHasReachedEnd();
             if (hasReachedEnd)
             {
                 // libVLC resets the time after the end of the media.
                 return DurationInMillis;
             }
 
-            lock (timePointLock)
+            double vlcTimeInMillis = Math.Max(0, (double)MediaPlayer.Time / MicrosecondsPerMillisecond);
+            if (pendingSeekPositionInMillis.HasValue)
             {
-                if (pendingSeekPositionInMillis.HasValue)
+                if (vlcTimeInMillis == vlcTimeAtSeekInMillis
+                    && Time.realtimeSinceStartup - seekTimeInSeconds < PendingSeekTimeoutInSeconds)
                 {
                     return pendingSeekPositionInMillis.Value;
                 }
-
-                if (TryInterpolatePositionInMillis(out double interpolatedPositionInMillis))
-                {
-                    return interpolatedPositionInMillis;
-                }
+                pendingSeekPositionInMillis = null;
             }
 
-            return Math.Max(0, MediaPlayer.Time / MicrosecondsPerMillisecond);
+            float nowInSeconds = Time.realtimeSinceStartup;
+            if (vlcTimeInMillis != lastVlcTimeInMillis)
+            {
+                lastVlcTimeInMillis = vlcTimeInMillis;
+                lastVlcTimeChangeInSeconds = nowInSeconds;
+            }
+
+            if (!MediaPlayer.IsPlaying)
+            {
+                lastPositionInMillis = vlcTimeInMillis;
+                return vlcTimeInMillis;
+            }
+
+            double extrapolationInMillis = Math.Min(
+                (nowInSeconds - lastVlcTimeChangeInSeconds) * 1000.0 * PlaybackSpeed,
+                MaxExtrapolationInMillis);
+            double positionInMillis = lastVlcTimeInMillis + extrapolationInMillis;
+
+            // Keep the position monotonic when libVLC corrects the extrapolation by a small amount.
+            if (positionInMillis < lastPositionInMillis
+                && lastPositionInMillis - positionInMillis < MaxHiddenBackwardCorrectionInMillis)
+            {
+                return lastPositionInMillis;
+            }
+
+            lastPositionInMillis = positionInMillis;
+            return positionInMillis;
         }
         set => SeekTo(value);
     }
@@ -217,45 +259,26 @@ public class VlcPlayback : IDisposable
         // libVLC jumped to the end of the media when seeking to exactly 0.
         positionInMillis = NumberUtils.Limit(positionInMillis, 1, Math.Max(1, DurationInMillis - 1));
 
+        UpdateHasReachedEnd();
         if (hasReachedEnd)
         {
             // libVLC stops at the end of the media. It has to be started again to be able to seek.
             // The caller decides whether it should be playing afterwards.
             hasReachedEnd = false;
             isStopRequested = false;
+            isRestarting = true;
             VlcMediaPlayer.Play();
             MediaPlayer.SetPause(true);
         }
 
-        lock (timePointLock)
-        {
-            pendingSeekPositionInMillis = positionInMillis;
-            lastTimePoint = null;
-        }
+        pendingSeekPositionInMillis = positionInMillis;
+        vlcTimeAtSeekInMillis = Math.Max(0, (double)MediaPlayer.Time / MicrosecondsPerMillisecond);
+        seekTimeInSeconds = Time.realtimeSinceStartup;
+        lastVlcTimeInMillis = -1;
+        lastPositionInMillis = positionInMillis;
 
         // Use precise seeking (not fast seeking) because the position is relevant for lyrics and scoring.
         MediaPlayer.SetTime((long)(positionInMillis * MicrosecondsPerMillisecond), false);
-    }
-
-    private bool TryInterpolatePositionInMillis(out double positionInMillis)
-    {
-        positionInMillis = 0;
-        if (!lastTimePoint.HasValue
-            || VLCMediaPlayer.LibVLC == null)
-        {
-            return false;
-        }
-
-        long systemDate = pausedSystemDateInMicroseconds ?? VLCMediaPlayer.LibVLC.Clock;
-        long interpolatedTime = 0;
-        double interpolatedPosition = 0;
-        if (!MediaPlayer.Interpolate(lastTimePoint.Value, systemDate, ref interpolatedTime, ref interpolatedPosition))
-        {
-            return false;
-        }
-
-        positionInMillis = (double)interpolatedTime / MicrosecondsPerMillisecond;
-        return true;
     }
 
     private double GetLengthInMillis()
@@ -275,46 +298,30 @@ public class VlcPlayback : IDisposable
 
     private void ResetTimeState()
     {
-        lock (timePointLock)
-        {
-            lastTimePoint = null;
-            pausedSystemDateInMicroseconds = null;
-            pendingSeekPositionInMillis = null;
-        }
+        lastVlcTimeInMillis = -1;
+        lastPositionInMillis = 0;
+        pendingSeekPositionInMillis = null;
         hasReachedEnd = false;
     }
 
-    // Called from a libVLC thread
-    private unsafe void OnTimeUpdate(TimePoint timePoint, void* opaque)
+    private void UpdateHasReachedEnd()
     {
-        lock (timePointLock)
+        if (MediaPlayer == null)
         {
-            lastTimePoint = timePoint;
-            pausedSystemDateInMicroseconds = null;
-            pendingSeekPositionInMillis = null;
+            return;
         }
-    }
 
-    // Called from a libVLC thread
-    private unsafe void OnTimePaused(long systemDate, void* opaque)
-    {
-        lock (timePointLock)
+        VLCState state = MediaPlayer.State;
+        if (isRestarting)
         {
-            pausedSystemDateInMicroseconds = systemDate;
+            isRestarting = state is VLCState.Stopped or VLCState.Stopping or VLCState.NothingSpecial;
+            return;
         }
-    }
 
-    // Called from a libVLC thread
-    private unsafe void OnTimeSeek(TimePoint? seekRequestValue, void* opaque)
-    {
-        // Nothing to do. The pending seek position is used until the next time update.
-    }
-
-    // Called from a libVLC thread
-    private void OnStopped(object sender, EventArgs e)
-    {
+        // libVLC 4 reports the end of the media as "stopped".
         if (!isStopRequested
-            && DurationInMillis > 0)
+            && DurationInMillis > 0
+            && state is VLCState.Stopped or VLCState.Stopping)
         {
             hasReachedEnd = true;
         }
@@ -325,12 +332,6 @@ public class VlcPlayback : IDisposable
         if (VlcMediaPlayer == null)
         {
             return;
-        }
-
-        if (MediaPlayer != null)
-        {
-            MediaPlayer.Stopped -= OnStopped;
-            MediaPlayer.UnwatchTime();
         }
 
         VlcMediaPlayer = null;

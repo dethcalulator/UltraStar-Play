@@ -55,6 +55,13 @@ public class VlcVideoSupportProvider : AbstractVideoSupportProvider, IVlcVideoSu
         VlcRenderTextureUtils.DrawWithAspectRatio(vlcPlayback.OutputTexture, targetTexture, scaleMode);
     }
 
+    private void OnDestroy()
+    {
+        // The libVLC media player must be released properly before its GameObject is destroyed.
+        // Otherwise, libVLC aborts because the time watcher is still registered.
+        Unload();
+    }
+
     public override void Unload()
     {
         vlcPlayback?.Dispose();
