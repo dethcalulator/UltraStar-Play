@@ -29,7 +29,9 @@
     "precompiledReferences": [
         "nunit.framework.dll",
         "Moq.dll",
-        "Facepunch.Steamworks.Win64.dll"
+        "Facepunch.Steamworks.Win64.dll",
+        "Facepunch.Steamworks.Linux.dll",
+        "Facepunch.Steamworks.MacOS.dll"
     ],
     "autoReferenced": false,
     "defineConstraints": [
