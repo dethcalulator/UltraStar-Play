@@ -61,12 +61,12 @@ public static class AudioSupportProviderSelectionStrategy
             // {
             //     return provider;
             // }
-            //
-            // if (mediaApi == EMediaApi.Vlc
-            //     && TryGetVlcProvider(availableProviders, audioUri, out provider))
-            // {
-            //     return provider;
-            // }
+
+            if (mediaApi == EMediaApi.Vlc
+                && TryGetVlcProvider(availableProviders, audioUri, out provider))
+            {
+                return provider;
+            }
         }
 
         return null;
@@ -122,24 +122,24 @@ public static class AudioSupportProviderSelectionStrategy
         return false;
     }
 
-    // private static bool TryGetVlcProvider(
-    //     IAudioSupportProvider[] availableProviders,
-    //     string audioUri,
-    //     out IAudioSupportProvider provider)
-    // {
-    //     string extension = Path.GetExtension(audioUri);
-    //     
-    //     if ((ApplicationUtils.IsVlcSupportedAudioFormat(extension)
-    //          || ApplicationUtils.IsVlcSupportedVideoFormat(extension))
-    //         && TryGetProvider<VlcAudioSupportProvider>(availableProviders, out provider))
-    //     {
-    //         return true;
-    //     }
-    //
-    //     provider = null;
-    //     return false;
-    // }
-    //
+    private static bool TryGetVlcProvider(
+        IAudioSupportProvider[] availableProviders,
+        string audioUri,
+        out IAudioSupportProvider provider)
+    {
+        string extension = Path.GetExtension(audioUri);
+
+        if ((ApplicationUtils.IsVlcSupportedAudioFormat(extension)
+             || ApplicationUtils.IsVlcSupportedVideoFormat(extension))
+            && TryGetProvider<IVlcAudioSupportProvider>(availableProviders, out provider))
+        {
+            return true;
+        }
+
+        provider = null;
+        return false;
+    }
+
     // private static bool TryGetAvProProvider(
     //     IAudioSupportProvider[] availableProviders,
     //     string audioUri,

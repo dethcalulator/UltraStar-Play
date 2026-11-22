@@ -640,7 +640,21 @@ public class SongVideoPlayer : MonoBehaviour, INeedInjection, IInjectionFinished
             videoSyncStrategy = new PlayPauseOnlyVideoSyncStrategy();
             return;
         }
-        
+
+        if (currentVideoSupportProvider is ISongAudioPlayerVlcVideoSupportProvider)
+        {
+            // Audio and video come from the same libVLC media player, thus they are in sync already.
+            videoSyncStrategy = new PlayPauseOnlyVideoSyncStrategy();
+            return;
+        }
+
+        if (currentVideoSupportProvider is IVlcVideoSupportProvider)
+        {
+            // Changing the playback rate of libVLC does not work smoothly. Use pause and seek instead.
+            videoSyncStrategy = new PauseAndSkipVideoSyncStrategy();
+            return;
+        }
+
         // Use playback speed adjustment by default (works perfect in Unity API).
         videoSyncStrategy = new PlaybackSpeedVideoSyncStrategy();
     }
