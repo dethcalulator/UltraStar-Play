@@ -19,6 +19,7 @@ class Build : NukeBuild
     [Parameter] readonly UnityTestPlatform testPlatform = UnityTestPlatform.EditMode;
     [Parameter] readonly bool downloadAiModels;
     [Parameter] readonly bool downloadFfmpegLibraries;
+    [Parameter("Path to a vlc-unity checkout with Linux build output")] readonly AbsolutePath vlcUnityDir;
 
     private readonly AbsolutePath mainGameDir = RootDirectory / "UltraStar Play";
     private readonly AbsolutePath companionAppDir = RootDirectory / "UltraStar Play Companion";
@@ -140,7 +141,7 @@ class Build : NukeBuild
                 "TagLibSharp.dll",
                 "Microsoft.ML.OnnxRuntime.dll",
                 "NWaves.dll",
-                "Ffmpeg.Autogen.dll",
+                "FFmpeg.AutoGen.dll",
                 "WindowsInput.dll" // Only used in mod "TriggerKeyStrokeToToggleMicWhenSinging"
                 );
         });
@@ -148,6 +149,12 @@ class Build : NukeBuild
     Target RestoreMainGameDependencies => _ => _
         .DependsOn(RestoreMainGameNuGetDependencies)
         .Executes(() => new MainGameDependencyDownloader(mainGameDir, cloneDepth, downloadAiModels, downloadFfmpegLibraries).DownloadAsync());
+
+    Target InstallVlcUnityPlugin => _ => _
+        .Executes(() => new VlcUnityPluginInstaller(mainGameDir, vlcUnityDir).Install());
+
+    Target UninstallVlcUnityPlugin => _ => _
+        .Executes(() => new VlcUnityPluginInstaller(mainGameDir, vlcUnityDir).Uninstall());
 
     Target RestoreCompanionAppNuGetDependencies => _ => _
         .DependsOn(RestoreMainGameNuGetDependencies) // Restore main game dependencies for playshared

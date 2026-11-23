@@ -83,3 +83,8 @@ MelodyMania-Data.lnk
 UltraStar Play - Data.lnk
 Unity-Editor-Log.lnk
 Steam Workshop Content.lnk
+# VLC for Unity plugin (LGPL), built from source and installed via Nuke target InstallVlcUnityPlugin
+UltraStar Play/Assets/VLCUnity/
+UltraStar Play/Assets/VLCUnity.meta
+UltraStar Play/Assets/csc.rsp
+UltraStar Play/Assets/csc.rsp.meta

@@ -38,12 +38,12 @@ public static class VideoSupportProviderSelectionStrategy
             // {
             //     return provider;
             // }
-            //
-            // if (mediaApi == EMediaApi.Vlc
-            //     && TryGetVlcProvider(availableProviders, videoUri, videoEqualsAudio, songAudioPlayer, out provider))
-            // {
-            //     return provider;
-            // }
+
+            if (mediaApi == EMediaApi.Vlc
+                && TryGetVlcProvider(availableProviders, videoUri, videoEqualsAudio, songAudioPlayer, out provider))
+            {
+                return provider;
+            }
         }
 
         return null;
@@ -103,31 +103,34 @@ public static class VideoSupportProviderSelectionStrategy
     //     provider = null;
     //     return false;
     // }
-    //
-    // private static bool TryGetVlcProvider(
-    //     IVideoSupportProvider[] availableProviders,
-    //     string videoUri,
-    //     bool videoEqualsAudio,
-    //     SongAudioPlayer songAudioPlayer,
-    //     out IVideoSupportProvider provider)
-    // {
-    //     if (videoEqualsAudio
-    //         && songAudioPlayer.CurrentAudioSupportProvider is VlcAudioSupportProvider
-    //         && TryGetProvider<SongAudioPlayerVlcVideoSupportProvider>(availableProviders, out provider))
-    //     {
-    //         return true;
-    //     }
-    //     
-    //     string extension = Path.GetExtension(videoUri);
-    //     if (ApplicationUtils.IsVlcSupportedVideoFormat(extension)
-    //         && TryGetProvider<VlcVideoSupportProvider>(availableProviders, out provider))
-    //     {
-    //         return true;
-    //     }
-    //
-    //     provider = null;
-    //     return false;
-    // }
+
+    private static bool TryGetVlcProvider(
+        IVideoSupportProvider[] availableProviders,
+        string videoUri,
+        bool videoEqualsAudio,
+        SongAudioPlayer songAudioPlayer,
+        out IVideoSupportProvider provider)
+    {
+        // Reuse the libVLC media player of the SongAudioPlayer to show the video.
+        // This avoids decoding the file twice and keeps audio and video in sync.
+        if (videoEqualsAudio
+            && songAudioPlayer != null
+            && songAudioPlayer.CurrentAudioSupportProvider is IVlcAudioSupportProvider
+            && TryGetProvider<ISongAudioPlayerVlcVideoSupportProvider>(availableProviders, out provider))
+        {
+            return true;
+        }
+
+        string extension = Path.GetExtension(videoUri);
+        if (ApplicationUtils.IsVlcSupportedVideoFormat(extension)
+            && TryGetProvider<IVlcVideoSupportProvider>(availableProviders, out provider))
+        {
+            return true;
+        }
+
+        provider = null;
+        return false;
+    }
 
     private static bool TryGetProvider<T>(IVideoSupportProvider[] availableProviders, out IVideoSupportProvider provider) where T : IVideoSupportProvider
     {

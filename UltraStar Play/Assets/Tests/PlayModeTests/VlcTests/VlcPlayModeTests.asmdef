@@ -1,0 +1,30 @@
+{
+    "name": "VlcPlayModeTests",
+    "rootNamespace": "",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "UniRx",
+        "com.achimmihca.uniinject",
+        "playshared",
+        "Common",
+        "Vlc",
+        "VLCUnity",
+        "PlayModeTests"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "LibVLCSharp.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "VLC_UNITY_INSTALLED"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

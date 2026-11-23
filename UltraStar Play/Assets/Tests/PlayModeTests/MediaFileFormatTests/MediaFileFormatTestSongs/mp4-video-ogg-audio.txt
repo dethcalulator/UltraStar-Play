@@ -1,0 +1,10 @@
+﻿#TITLE:Separate MP4 Video Format Test
+#ARTIST:Test Artist
+#MP3:ogg.ogg
+#VIDEO:mp4.mp4
+#BPM:200
+- 0
+: 4 3 9 Hel
+: 8 3 9  lo
+: 12 3 9  world!
+E

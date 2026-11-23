@@ -178,7 +178,8 @@ public class Settings : ISettings
     public EApiUsage UnityMediaApiUsage { get; set; } = EApiUsage.Enabled;
     // TODO: AVPro is disabled by default due to crashes reported by users
     public EApiUsage AvProApiUsage { get; set; } = EApiUsage.Disabled;
-    public EApiUsage VlcApiUsage { get; set; } = EApiUsage.Preferred;
+    // VLC is only used as fallback by default, i.e., when Unity cannot handle the file format.
+    public EApiUsage VlcApiUsage { get; set; } = EApiUsage.Enabled;
     public EApiUsage FfmpegApiUsage { get; set; } = EApiUsage.Enabled;
 
     // Mods
