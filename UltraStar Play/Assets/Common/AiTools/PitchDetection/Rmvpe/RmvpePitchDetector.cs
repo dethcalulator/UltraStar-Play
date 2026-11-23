@@ -11,6 +11,7 @@ public class RmvpePitchDetector : IDisposable
 
     private const string InputTensorName = "waveform";
     private const string OutputTensorName = "pitchf";
+    private const string AlternativeOutputTensorName = "f0";
     private const string ThresholdTensorName = "threshold";
     private const int HopLength = 160;
 
@@ -50,7 +51,9 @@ public class RmvpePitchDetector : IDisposable
 
         using (var results = session.Run(inputs))
         {
-            var outputValue = results.First(v => v.Name == OutputTensorName);
+            // The official RMVPE ONNX export (github.com/yxlllc/RMVPE) names the output "f0".
+            var outputValue = results.FirstOrDefault(v => v.Name == OutputTensorName)
+                              ?? results.First(v => v.Name == AlternativeOutputTensorName);
             var output = outputValue.AsTensor<float>();
 
             // Output shape [1, T] or [T]
