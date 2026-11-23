@@ -21,6 +21,12 @@ public class VlcPlayback : IDisposable
 
     private const float PendingSeekTimeoutInSeconds = 1;
 
+    // libVLC has completed a seek when its time is this close to the expected position.
+    private const double SeekCompletedToleranceInMillis = 250;
+
+    // libVLC 4 buffers 1000 ms by default, which delays the playback after seeking.
+    private const string FileCachingOption = ":file-caching=300";
+
     private const float LoadTimeoutInSeconds = 10;
     private const float PausedLengthTimeoutInSeconds = 1;
 
@@ -37,7 +43,6 @@ public class VlcPlayback : IDisposable
 
     // Position that has been set but is not yet reflected by the time of libVLC.
     private double? pendingSeekPositionInMillis;
-    private double vlcTimeAtSeekInMillis;
     private float seekTimeInSeconds;
 
     private bool hasReachedEnd;
@@ -61,14 +66,33 @@ public class VlcPlayback : IDisposable
         VlcMediaPlayer = gameObject.AddComponent<VLCMediaPlayer>();
         VlcMediaPlayer.playOnAwake = false;
         VlcMediaPlayer.logPlayerActivity = settings.LogVlcOutput;
-        VlcMediaPlayer.libVLCArguments = settings.VlcOptions
-            .Where(option => !option.IsNullOrEmpty())
-            .ToArray();
+        VlcMediaPlayer.libVLCArguments = GetLibVlcArguments(settings);
 
         gameObject.SetActive(true);
 
         // Note: The state is polled instead of using libVLC events (e.g. MediaPlayer.Stopped, MediaPlayer.WatchTime).
-        // Events are called from libVLC threads, which can block the garbage collector of Unity's Mono runtime.
+        // Events are called from libVLC threads and would have to be dispatched to the main thread anyway.
+    }
+
+    private static string[] GetLibVlcArguments(Settings settings)
+    {
+        string[] options = settings.VlcOptions
+            .Where(option => !option.IsNullOrEmpty())
+            .ToArray();
+
+#if UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX
+        // LibVLCSharp registers managed callbacks for all media player events (e.g. audio volume changed).
+        // The PulseAudio output of libVLC calls some of them from the PulseAudio mainloop thread,
+        // which blocks all signals. Mono cannot suspend this thread for garbage collection anymore,
+        // such that the next garbage collection freezes the application.
+        // The ALSA output calls these callbacks from libVLC threads, which is fine.
+        if (!options.Any(option => option.Trim().StartsWith("--aout")))
+        {
+            options = options.Append("--aout=alsa").ToArray();
+        }
+#endif
+
+        return options;
     }
 
     public async Awaitable LoadAsync(string uri, double startPositionInMillis, params string[] mediaOptions)
@@ -80,6 +104,7 @@ public class VlcPlayback : IDisposable
         // Start paused. Playback is started explicitly by the caller.
         string[] options = mediaOptions
             .Append(":start-paused")
+            .Prepend(FileCachingOption)
             .ToArray();
         await VlcMediaPlayer.OpenAsync(uri, options);
         if (VlcMediaPlayer == null)
@@ -208,10 +233,16 @@ public class VlcPlayback : IDisposable
             double vlcTimeInMillis = Math.Max(0, (double)MediaPlayer.Time / MicrosecondsPerMillisecond);
             if (pendingSeekPositionInMillis.HasValue)
             {
-                if (vlcTimeInMillis == vlcTimeAtSeekInMillis
-                    && Time.realtimeSinceStartup - seekTimeInSeconds < PendingSeekTimeoutInSeconds)
+                // libVLC may still report times from before the seek. Advance the target position while playing.
+                float timeSinceSeekInSeconds = Time.realtimeSinceStartup - seekTimeInSeconds;
+                double expectedPositionInMillis = MediaPlayer.IsPlaying
+                    ? pendingSeekPositionInMillis.Value + timeSinceSeekInSeconds * 1000.0 * PlaybackSpeed
+                    : pendingSeekPositionInMillis.Value;
+                if (Math.Abs(vlcTimeInMillis - expectedPositionInMillis) > SeekCompletedToleranceInMillis
+                    && timeSinceSeekInSeconds < PendingSeekTimeoutInSeconds)
                 {
-                    return pendingSeekPositionInMillis.Value;
+                    lastPositionInMillis = expectedPositionInMillis;
+                    return expectedPositionInMillis;
                 }
                 pendingSeekPositionInMillis = null;
             }
@@ -272,7 +303,6 @@ public class VlcPlayback : IDisposable
         }
 
         pendingSeekPositionInMillis = positionInMillis;
-        vlcTimeAtSeekInMillis = Math.Max(0, (double)MediaPlayer.Time / MicrosecondsPerMillisecond);
         seekTimeInSeconds = Time.realtimeSinceStartup;
         lastVlcTimeInMillis = -1;
         lastPositionInMillis = positionInMillis;

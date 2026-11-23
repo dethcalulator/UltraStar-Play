@@ -156,10 +156,11 @@ public class VlcMediaFileFormatTest : AbstractMediaFileFormatTest
         // Jump forward like "skip to next lyrics", then backward.
         // SongVideoPlayer synchronizes immediately for jumps of more than 2 seconds.
         // Smaller offsets are corrected by the video sync strategy over time.
-        foreach (double targetPositionInMillis in new double[] { 3300, 300 })
+        // libVLC needs a moment to continue playback after seeking.
+        foreach (double targetPositionInMillis in new double[] { 2700, 300 })
         {
             songAudioPlayer.PositionInMillis = targetPositionInMillis;
-            yield return new WaitForSeconds(0.5f);
+            yield return new WaitForSeconds(1f);
 
             double offsetInMillis = songVideoPlayer.PositionInMillis - songAudioPlayer.PositionInMillis;
             Debug.Log($"Audio/video offset after jump to {targetPositionInMillis} ms: {offsetInMillis:F1} ms");
